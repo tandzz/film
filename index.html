@@ -163,6 +163,7 @@
         let customVideo;
         let currentVideoType = null; // 'youtube' or 'custom'
         let isSyncing = false;
+        let lastVideoState = null;
         
         // Initialize YouTube Player
         function onYouTubeIframeAPIReady() {
@@ -177,7 +178,7 @@
         }
         
         function onPlayerReady(event) {
-            // YouTube player is ready
+            console.log("YouTube player is ready");
         }
         
         function onPlayerStateChange(event) {
@@ -187,12 +188,18 @@
             const isPlaying = event.data === YT.PlayerState.PLAYING;
             
             // Sync play/pause action
-            database.ref('videoState').set({
+            const newState = {
                 isPlaying: isPlaying,
                 timestamp: Date.now(),
                 videoType: 'youtube',
                 videoId: player.getVideoData().video_id
-            });
+            };
+            
+            // Only update if state has changed
+            if (!lastVideoState || JSON.stringify(newState) !== JSON.stringify(lastVideoState)) {
+                database.ref('videoState').set(newState);
+                lastVideoState = newState;
+            }
             
             updateProgressBar();
         }
@@ -202,22 +209,34 @@
         
         customVideo.addEventListener('play', () => {
             if (isSyncing) return;
-            database.ref('videoState').set({
+            
+            const newState = {
                 isPlaying: true,
                 timestamp: Date.now(),
                 videoType: 'custom',
                 videoUrl: customVideo.src
-            });
+            };
+            
+            if (!lastVideoState || JSON.stringify(newState) !== JSON.stringify(lastVideoState)) {
+                database.ref('videoState').set(newState);
+                lastVideoState = newState;
+            }
         });
         
         customVideo.addEventListener('pause', () => {
             if (isSyncing) return;
-            database.ref('videoState').set({
+            
+            const newState = {
                 isPlaying: false,
                 timestamp: Date.now(),
                 videoType: 'custom',
                 videoUrl: customVideo.src
-            });
+            };
+            
+            if (!lastVideoState || JSON.stringify(newState) !== JSON.stringify(lastVideoState)) {
+                database.ref('videoState').set(newState);
+                lastVideoState = newState;
+            }
         });
         
         customVideo.addEventListener('timeupdate', updateProgressBar);
@@ -264,7 +283,10 @@
         
         function loadVideo() {
             const url = videoUrlInput.value.trim();
-            if (!url) return;
+            if (!url) {
+                alert("Vui lòng nhập link video");
+                return;
+            }
             
             // Reset previous video
             if (currentVideoType === 'youtube') {
@@ -292,33 +314,43 @@
                 }
                 
                 // Load YouTube video
-                player.loadVideoById(videoId);
-                player.playVideo();
-                document.getElementById('youtube-player').style.display = 'block';
-                currentVideoType = 'youtube';
-                
-                // Save video to Firebase
-                database.ref('currentVideo').set({
-                    type: 'youtube',
-                    url: videoId,
-                    timestamp: Date.now()
-                });
+                try {
+                    player.loadVideoById(videoId);
+                    player.playVideo();
+                    document.getElementById('youtube-player').style.display = 'block';
+                    currentVideoType = 'youtube';
+                    
+                    // Save video to Firebase
+                    database.ref('currentVideo').set({
+                        type: 'youtube',
+                        url: videoId,
+                        timestamp: Date.now()
+                    });
+                    
+                    showSystemMessage('Video YouTube đã được tải, thưởng thức cùng mọi người!');
+                } catch (e) {
+                    alert('Lỗi khi tải video YouTube: ' + e.message);
+                }
             } else {
                 // Assume it's a direct video URL
-                customVideo.src = url;
-                customVideo.style.display = 'block';
-                currentVideoType = 'custom';
-                
-                // Save video to Firebase
-                database.ref('currentVideo').set({
-                    type: 'custom',
-                    url: url,
-                    timestamp: Date.now()
-                });
+                try {
+                    customVideo.src = url;
+                    customVideo.load();
+                    customVideo.style.display = 'block';
+                    currentVideoType = 'custom';
+                    
+                    // Save video to Firebase
+                    database.ref('currentVideo').set({
+                        type: 'custom',
+                        url: url,
+                        timestamp: Date.now()
+                    });
+                    
+                    showSystemMessage('Video trực tiếp đã được tải, thưởng thức cùng mọi người!');
+                } catch (e) {
+                    alert('Lỗi khi tải video trực tiếp: ' + e.message);
+                }
             }
-            
-            // Reset chat message
-            showSystemMessage('Video mới đã được tải, thưởng thức cùng mọi người!');
         }
         
         // Video Controls
@@ -369,16 +401,28 @@
             const message = messageInput.value.trim();
             const username = usernameInput.value.trim() || 'Ẩn danh';
             
-            if (!message) return;
+            if (!message) {
+                alert("Vui lòng nhập tin nhắn");
+                return;
+            }
+            
+            if (!username) {
+                alert("Vui lòng nhập tên của bạn");
+                return;
+            }
             
             // Save to Firebase
             database.ref('messages').push().set({
                 username: username,
                 text: message,
                 timestamp: Date.now()
+            })
+            .then(() => {
+                messageInput.value = '';
+            })
+            .catch((error) => {
+                alert('Lỗi khi gửi tin nhắn: ' + error.message);
             });
-            
-            messageInput.value = '';
         }
         
         function showSystemMessage(text) {
@@ -389,9 +433,9 @@
             chatMessages.scrollTop = chatMessages.scrollHeight;
         }
         
-        function addMessageToChat(username, text, isCurrentUser ) {
+        function addMessageToChat(username, text, isCurrentUser) {
             const messageDiv = document.createElement('div');
-            messageDiv.className = isCurrentUser  ? 'message-current-user' : 'message-other-user';
+            messageDiv.className = isCurrentUser ? 'message-current-user' : 'message-other-user';
             messageDiv.className += ' p-3 max-w-xs md:max-w-md';
             
             const usernameSpan = document.createElement('span');
@@ -418,6 +462,11 @@
             const currentUsername = usernameInput.value.trim() || 'Ẩn danh';
             
             if (data.videoType === 'youtube' && player) {
+                // Only update if the video is different
+                if (player.getVideoData().video_id !== data.videoId) {
+                    player.loadVideoById(data.videoId);
+                }
+                
                 if (data.isPlaying) {
                     player.playVideo();
                     showSystemMessage(`${currentUsername} đã nhấn phát video`);
@@ -426,7 +475,11 @@
                     showSystemMessage(`${currentUsername} đã nhấn tạm dừng`);
                 }
             } else if (data.videoType === 'custom' && customVideo) {
-                customVideo.src = data.videoUrl;
+                if (customVideo.src !== data.videoUrl) {
+                    customVideo.src = data.videoUrl;
+                    customVideo.load();
+                }
+                
                 customVideo.style.display = 'block';
                 if (data.isPlaying) {
                     customVideo.play();
@@ -438,4 +491,41 @@
             }
             
             setTimeout(() => {
-                isSyncing
+                isSyncing = false;
+            }, 500);
+        });
+        
+        database.ref('currentVideo').on('value', (snapshot) => {
+            const data = snapshot.val();
+            if (!data) return;
+            
+            const currentUsername = usernameInput.value.trim() || 'Ẩn danh';
+            
+            if (data.type === 'youtube') {
+                player.loadVideoById(data.url);
+                document.getElementById('youtube-player').style.display = 'block';
+                customVideo.style.display = 'none';
+                currentVideoType = 'youtube';
+                showSystemMessage(`${currentUsername} đã thay đổi video`);
+            } else if (data.type === 'custom') {
+                customVideo.src = data.url;
+                customVideo.load();
+                customVideo.style.display = 'block';
+                document.getElementById('youtube-player').style.display = 'none';
+                currentVideoType = 'custom';
+                showSystemMessage(`${currentUsername} đã thay đổi video`);
+            }
+        });
+        
+        database.ref('messages').limitToLast(50).on('child_added', (snapshot) => {
+            const message = snapshot.val();
+            const currentUsername = usernameInput.value.trim() || 'Ẩn danh';
+            addMessageToChat(message.username, message.text, message.username === currentUsername);
+        });
+        
+        // Initial setup
+        showSystemMessage('Chào mừng đến với phòng xem video cùng nhau!');
+        usernameInput.focus();
+    </script>
+</body>
+</html>
