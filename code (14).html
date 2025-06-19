@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cùng Xem Video Và Chat</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://www.youtube.com/iframe_api"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.6.0/firebase-database-compat.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f5f5f5;
+        }
+        
+        #video-container {
+            position: relative;
+            padding-bottom: 56.25%; /* 16:9 aspect ratio */
+            height: 0;
+            overflow: hidden;
+        }
+        
+        #youtube-player, #custom-video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        
+        .message-current-user {
+            background-color: #3b82f6;
+            color: white;
+            border-radius: 1rem 1rem 0 1rem;
+        }
+        
+        .message-other-user {
+            background-color: #e5e7eb;
+            color: #1f2937;
+            border-radius: 1rem 1rem 1rem 0;
+        }
+        
+        @media (max-width: 768px) {
+            .main-container {
+                flex-direction: column;
+            }
+            .chat-container {
+                max-height: 300px;
+                border-left: none;
+                border-top: 1px solid #e5e7eb;
+            }
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col">
+    <header class="bg-white shadow-sm py-4 px-6">
+        <h1 class="text-2xl font-bold text-blue-600">Cùng Xem Video Và Chat</h1>
+    </header>
+
+    <div class="flex-1 p-4 main-container flex flex-col md:flex-row max-w-6xl mx-auto w-full gap-4">
+        <!-- Video Section -->
+        <div class="flex-1 bg-white rounded-lg shadow-sm overflow-hidden">
+            <div class="p-4 border-b border-gray-200">
+                <h2 class="text-lg font-semibold">Trình phát video</h2>
+                <div class="flex items-center gap-2 mt-2">
+                    <div class="relative flex-1">
+                        <input type="text" id="video-url" placeholder="Dán link YouTube hoặc MP4/WebM" 
+                            class="w-full p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <button id="load-video-btn" class="absolute right-2 top-1/2 transform -translate-y-1/2 bg-blue-500 text-white px-3 py-1 rounded-lg hover:bg-blue-600 transition">
+                            Tải
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="video-player" class="p-4">
+                <div id="video-container">
+                    <div id="youtube-player"></div>
+                    <video id="custom-video" controls style="display: none;"></video>
+                </div>
+                
+                <div class="flex justify-center gap-4 mt-4">
+                    <button id="play-btn" class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
+                        </svg>
+                        Phát
+                    </button>
+                    <button id="pause-btn" class="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 transition flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" />
+                        </svg>
+                        Tạm dừng
+                    </button>
+                </div>
+                
+                <div class="flex items-center justify-between mt-2">
+                    <span id="current-time" class="text-sm text-gray-500">0:00</span>
+                    <span id="duration" class="text-sm text-gray-500">0:00</span>
+                </div>
+                <input type="range" id="progress-bar" min="0" max="100" value="0" class="w-full mt-2 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+            </div>
+        </div>
+        
+        <!-- Chat Section -->
+        <div class="w-full md:w-80 bg-white rounded-lg shadow-sm overflow-hidden flex flex-col chat-container">
+            <div class="p-4 border-b border-gray-200">
+                <h2 class="text-lg font-semibold">Trò chuyện</h2>
+                <div class="mt-2">
+                    <input type="text" id="username" placeholder="Tên của bạn" class="w-full p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+            </div>
+            
+            <div id="chat-messages" class="flex-1 p-4 overflow-y-auto space-y-3">
+                <p class="text-sm text-gray-500 text-center">Bắt đầu trò chuyện khi xem video cùng nhau</p>
+            </div>
+            
+            <div class="p-4 border-t border-gray-200">
+                <div class="flex gap-2">
+                    <input type="text" id="message-input" placeholder="Nhắn tin..." class="flex-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <button id="send-btn" class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition">
+                        Gửi
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Firebase Config
+        const firebaseConfig = {
+            apiKey: "AIzaSyA2wbn6e5poByif0EZd2sQzsrJxOx-MGEk",
+            authDomain: "video-watch-party-a5efe.firebaseapp.com",
+            databaseURL: "https://video-watch-party-a5efe-default-rtdb.asia-southeast1.firebasedatabase.app",
+            projectId: "video-watch-party-a5efe",
+            storageBucket: "video-watch-party-a5efe.appspot.com",
+            messagingSenderId: "1074813235150",
+            appId: "1:1074813235150:web:0c9c270564f8af1a2feb9a"
+        };
+        
+        // Initialize Firebase
+        const app = firebase.initializeApp(firebaseConfig);
+        const database = firebase.database();
+        
+        // DOM Elements
+        const videoUrlInput = document.getElementById('video-url');
+        const loadVideoBtn = document.getElementById('load-video-btn');
+        const playBtn = document.getElementById('play-btn');
+        const pauseBtn = document.getElementById('pause-btn');
+        const progressBar = document.getElementById('progress-bar');
+        const currentTimeDisplay = document.getElementById('current-time');
+        const durationDisplay = document.getElementById('duration');
+        const chatMessages = document.getElementById('chat-messages');
+        const messageInput = document.getElementById('message-input');
+        const sendBtn = document.getElementById('send-btn');
+        const usernameInput = document.getElementById('username');
+        
+        // Video State
+        let player;
+        let customVideo;
+        let currentVideoType = null; // 'youtube' or 'custom'
+        let isSyncing = false;
+        
+        // Initialize YouTube Player
+        function onYouTubeIframeAPIReady() {
+            player = new YT.Player('youtube-player', {
+                height: '100%',
+                width: '100%',
+                events: {
+                    'onReady': onPlayerReady,
+                    'onStateChange': onPlayerStateChange
+                }
+            });
+        }
+        
+        function onPlayerReady(event) {
+            // YouTube player is ready
+        }
+        
+        function onPlayerStateChange(event) {
+            if (isSyncing) return;
+            
+            if (event.data === YT.PlayerState.PLAYING) {
+                // Sync play action
+                database.ref('videoState').update({
+                    isPlaying: true,
+                    timestamp: Date.now()
+                });
+            } else if (event.data === YT.PlayerState.PAUSED) {
+                // Sync pause action
+                database.ref('videoState').update({
+                    isPlaying: false,
+                    timestamp: Date.now()
+                });
+            }
+            
+            updateProgressBar();
+        }
+        
+        // Initialize Custom Video
+        customVideo = document.getElementById('custom-video');
+        
+        customVideo.addEventListener('play', () => {
+            if (isSyncing) return;
+            
+            database.ref('videoState').update({
+                isPlaying: true,
+                timestamp: Date.now()
+            });
+        });
+        
+        customVideo.addEventListener('pause', () => {
+            if (isSyncing) return;
+            
+            database.ref('videoState').update({
+                isPlaying: false,
+                timestamp: Date.now()
+            });
+        });
+        
+        customVideo.addEventListener('timeupdate', updateProgressBar);
+        
+        function updateProgressBar() {
+            if (!currentVideoType) return;
+            
+            let currentTime, duration;
+            
+            if (currentVideoType === 'youtube' && player && player.getCurrentTime) {
+                currentTime = player.getCurrentTime();
+                duration = player.getDuration();
+            } else if (currentVideoType === 'custom' && customVideo) {
+                currentTime = customVideo.currentTime;
+                duration = customVideo.duration;
+            } else {
+                return;
+            }
+            
+            const progress = (currentTime / duration) * 100;
+            progressBar.value = progress;
+            
+            // Update time displays
+            currentTimeDisplay.textContent = formatTime(currentTime);
+            
+            if (!isNaN(duration)) {
+                durationDisplay.textContent = formatTime(duration);
+            } else {
+                durationDisplay.textContent = "0:00";
+            }
+        }
+        
+        function formatTime(seconds) {
+            const minutes = Math.floor(seconds / 60);
+            seconds = Math.floor(seconds % 60);
+            return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+        }
+        
+        // Load Video Function
+        loadVideoBtn.addEventListener('click', loadVideo);
+        videoUrlInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') loadVideo();
+        });
+        
+        function loadVideo() {
+            const url = videoUrlInput.value.trim();
+            if (!url) return;
+            
+            // Reset previous video
+            if (currentVideoType === 'youtube') {
+                document.getElementById('youtube-player').style.display = 'none';
+                player.stopVideo();
+            } else if (currentVideoType === 'custom') {
+                customVideo.style.display = 'none';
+                customVideo.pause();
+                customVideo.src = '';
+            }
+            
+            // Check if YouTube video
+            const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.?be)\/.+$/;
+            if (youtubeRegex.test(url)) {
+                // Extract YouTube video ID
+                let videoId = '';
+                const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
+                const match = url.match(regExp);
+                
+                if (match && match[2].length === 11) {
+                    videoId = match[2];
+                } else {
+                    alert('Không tìm thấy ID video YouTube trong đường dẫn này');
+                    return;
+                }
+                
+                // Load YouTube video
+                player.loadVideoById(videoId);
+                player.playVideo();
+                document.getElementById('youtube-player').style.display = 'block';
+                currentVideoType = 'youtube';
+                
+                // Save video to Firebase
+                database.ref('currentVideo').set({
+                    type: 'youtube',
+                    url: videoId,
+                    timestamp: Date.now()
+                });
+            } else {
+                // Assume it's a direct video URL
+                customVideo.src = url;
+                customVideo.style.display = 'block';
+                currentVideoType = 'custom';
+                
+                // Save video to Firebase
+                database.ref('currentVideo').set({
+                    type: 'custom',
+                    url: url,
+                    timestamp: Date.now()
+                });
+            }
+            
+            // Reset chat message
+            showSystemMessage('Video mới đã được tải, thưởng thức cùng mọi người!');
+        }
+        
+        // Video Controls
+        playBtn.addEventListener('click', () => {
+            if (currentVideoType === 'youtube' && player && player.playVideo) {
+                player.playVideo();
+            } else if (currentVideoType === 'custom' && customVideo) {
+                customVideo.play();
+            }
+        });
+        
+        pauseBtn.addEventListener('click', () => {
+            if (currentVideoType === 'youtube' && player && player.pauseVideo) {
+                player.pauseVideo();
+            } else if (currentVideoType === 'custom' && customVideo) {
+                customVideo.pause();
+            }
+        });
+        
+        progressBar.addEventListener('input', () => {
+            if (!currentVideoType) return;
+            
+            const seekTime = (progressBar.value / 100) * getCurrentVideoDuration();
+            
+            if (currentVideoType === 'youtube' && player && player.seekTo) {
+                player.seekTo(seekTime, true);
+            } else if (currentVideoType === 'custom' && customVideo) {
+                customVideo.currentTime = seekTime;
+            }
+        });
+        
+        function getCurrentVideoDuration() {
+            if (currentVideoType === 'youtube' && player && player.getDuration) {
+                return player.getDuration();
+            } else if (currentVideoType === 'custom' && customVideo && !isNaN(customVideo.duration)) {
+                return customVideo.duration;
+            }
+            return 0;
+        }
+        
+        // Chat Functionality
+        sendBtn.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') sendMessage();
+        });
+        
+        function sendMessage() {
+            const message = messageInput.value.trim();
+            const username = usernameInput.value.trim() || 'Ẩn danh';
+            
+            if (!message) return;
+            
+            // Save to Firebase
+            database.ref('messages').push().set({
+                username: username,
+                text: message,
+                timestamp: Date.now()
+            });
+            
+            messageInput.value = '';
+        }
+        
+        function showSystemMessage(text) {
+            const messageElement = document.createElement('p');
+            messageElement.className = 'text-sm text-gray-500 text-center';
+            messageElement.textContent = text;
+            chatMessages.appendChild(messageElement);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+        
+        function addMessageToChat(username, text, isCurrentUser) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = isCurrentUser ? 'message-current-user' : 'message-other-user';
+            messageDiv.className += ' p-3 max-w-xs md:max-w-md';
+            
+            const usernameSpan = document.createElement('span');
+            usernameSpan.className = 'font-semibold text-xs block mb-1';
+            usernameSpan.textContent = username;
+            
+            const textSpan = document.createElement('span');
+            textSpan.className = 'text-sm';
+            textSpan.textContent = text;
+            
+            messageDiv.appendChild(usernameSpan);
+            messageDiv.appendChild(textSpan);
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+        
+        // Firebase Listeners
+        database.ref('videoState').on('value', (snapshot) => {
+            const data = snapshot.val();
+            if (!data || isSyncing) return;
+            
+            isSyncing = true;
+            
+            const currentUsername = usernameInput.value.trim() || 'Ẩn danh';
+            
+            if (currentVideoType === 'youtube' && player) {
+                if (data.isPlaying) {
+                    player.playVideo();
+                    showSystemMessage(`${currentUsername} đã nhấn phát video`);
+                } else {
+                    player.pauseVideo();
+                    showSystemMessage(`${currentUsername} đã nhấn tạm dừng`);
+                }
+            } else if (currentVideoType === 'custom' && customVideo) {
+                if (data.isPlaying) {
+                    customVideo.play();
+                    showSystemMessage(`${currentUsername} đã nhấn phát video`);
+                } else {
+                    customVideo.pause();
+                    showSystemMessage(`${currentUsername} đã nhấn tạm dừng`);
+                }
+            }
+            
+            setTimeout(() => {
+                isSyncing = false;
+            }, 500);
+        });
+        
+        database.ref('currentVideo').on('value', (snapshot) => {
+            const data = snapshot.val();
+            if (!data) return;
+            
+            const currentUsername = usernameInput.value.trim() || 'Ẩn danh';
+            
+            if (data.type === 'youtube') {
+                player.loadVideoById(data.url);
+                document.getElementById('youtube-player').style.display = 'block';
+                customVideo.style.display = 'none';
+                currentVideoType = 'youtube';
+                showSystemMessage(`${currentUsername} đã thay đổi video`);
+            } else if (data.type === 'custom') {
+                customVideo.src = data.url;
+                customVideo.style.display = 'block';
+                document.getElementById('youtube-player').style.display = 'none';
+                currentVideoType = 'custom';
+                showSystemMessage(`${currentUsername} đã thay đổi video`);
+            }
+        });
+        
+        database.ref('messages').limitToLast(50).on('child_added', (snapshot) => {
+            const message = snapshot.val();
+            const currentUsername = usernameInput.value.trim() || 'Ẩn danh';
+            addMessageToChat(message.username, message.text, message.username === currentUsername);
+        });
+        
+        // Initial setup
+        showSystemMessage('Chào mừng đến với phòng xem video cùng nhau!');
+        usernameInput.focus();
+    </script>
+</body>
+</html>
