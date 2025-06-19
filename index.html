@@ -1,744 +1,878 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cùng Xem Video Và Chat</title>
+    <title>VideoSync - Watch Videos with Friends</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://www.youtube.com/iframe_api"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
-        
-        body {
-            font-family: 'Inter', sans-serif;
-            background-color: #f5f5f5;
+        /* Custom styles */
+        .video-container {
+            perspective: 1000px;
         }
-        
-        #video-container {
-            position: relative;
-            padding-bottom: 56.25%; /* 16:9 aspect ratio */
-            height: 0;
-            overflow: hidden;
+        .video-wrapper {
+            transition: transform 0.3s ease;
         }
-        
-        #youtube-player, #custom-video {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
+        .video-wrapper:hover {
+            transform: translateY(-5px);
         }
-        
-        .message-current-user {
-            background-color: #3b82f6;
-            color: white;
-            border-radius: 1rem 1rem 0 1rem;
+        .chat-bubble {
+            animation: fadeIn 0.3s ease;
         }
-        
-        .message-other-user {
-            background-color: #e5e7eb;
-            color: #1f2937;
-            border-radius: 1rem 1rem 1rem 0;
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
         }
-        
-        @media (max-width: 768px) {
-            .main-container {
-                flex-direction: column;
-            }
-            .chat-container {
-                max-height: 300px;
-                border-left: none;
-                border-top: 1px solid #e5e7eb;
-            }
+        /* Pulse animation for mic */
+        .pulse {
+            animation: pulse 1.5s infinite;
         }
-        
-        .loading-spinner {
-            border: 3px solid rgba(0, 0, 0, 0.1);
-            border-radius: 50%;
-            border-top: 3px solid #3b82f6;
-            width: 20px;
-            height: 20px;
-            animation: spin 1s linear infinite;
-        }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+        @keyframes pulse {
+            0% { opacity: 0.6; }
+            50% { opacity: 1; }
+            100% { opacity: 0.6; }
         }
     </style>
 </head>
-<body class="min-h-screen flex flex-col">
-    <header class="bg-white shadow-sm py-4 px-6">
-        <h1 class="text-2xl font-bold text-blue-600">Cùng Xem Video Và Chat</h1>
-        <div id="connection-status" class="text-sm flex items-center gap-1">
-            <div class="w-2 h-2 rounded-full bg-red-500"></div>
-            <span>Đang kết nối...</span>
-        </div>
-    </header>
+<body class="bg-gray-900 text-white min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <header class="mb-8 text-center">
+            <h1 class="text-4xl font-bold text-teal-400 mb-2">VideoSync</h1>
+            <p class="text-gray-300">Watch videos together with friends in real-time with synchronized playback</p>
+        </header>
 
-    <div class="flex-1 p-4 main-container flex flex-col md:flex-row max-w-6xl mx-auto w-full gap-4">
-        <!-- Video Section -->
-        <div class="flex-1 bg-white rounded-lg shadow-sm overflow-hidden">
-            <div class="p-4 border-b border-gray-200">
-                <h2 class="text-lg font-semibold">Trình phát video</h2>
-                <div class="flex items-center gap-2 mt-2">
-                    <div class="relative flex-1">
-                        <input type="text" id="video-url" placeholder="Dán link YouTube hoặc MP4/WebM" 
-                            class="w-full p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-                        <button id="load-video-btn" class="absolute right-2 top-1/2 transform -translate-y-1/2 bg-blue-500 text-white px-3 py-1 rounded-lg hover:bg-blue-600 transition flex items-center gap-1">
-                            <span>Tải</span>
-                            <div id="video-loading" class="loading-spinner hidden"></div>
-                        </button>
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <!-- Left sidebar - Room controls -->
+            <div class="bg-gray-800 rounded-lg p-6 lg:col-span-1">
+                <h2 class="text-xl font-semibold mb-4 text-teal-300">Room Controls</h2>
+                
+                <div id="room-creation" class="mb-6">
+                    <div class="mb-4">
+                        <label class="block text-gray-300 mb-2" for="room-id">Room ID:</label>
+                        <input type="text" id="room-id" class="w-full px-3 py-2 bg-gray-700 rounded focus:outline-none focus:ring-2 focus:ring-teal-400" placeholder="Enter or generate room ID">
+                    </div>
+                    <div class="flex space-x-2">
+                        <button id="create-room" class="flex-1 bg-teal-600 hover:bg-teal-500 text-white py-2 px-4 rounded transition">Create Room</button>
+                        <button id="join-room" class="flex-1 bg-purple-600 hover:bg-purple-500 text-white py-2 px-4 rounded transition">Join Room</button>
                     </div>
                 </div>
-            </div>
-            
-            <div id="video-player" class="p-4">
-                <div id="video-container">
-                    <div id="youtube-player"></div>
-                    <video id="custom-video" controls style="display: none;"></video>
-                </div>
-                
-                <div class="flex justify-center gap-4 mt-4">
-                    <button id="play-btn" class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition flex items-center gap-2">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM9.555 7.168A1 1 0 008 8v4a1 1 0 001.555.832l3-2a1 1 0 000-1.664l-3-2z" clip-rule="evenodd" />
-                        </svg>
-                        Phát
+
+                <div id="room-info" class="hidden mb-6">
+                    <div class="bg-gray-700 p-3 rounded mb-3">
+                        <p class="text-gray-300">Room ID: <span id="current-room-id" class="font-mono text-teal-300"></span></p>
+                        <p class="text-gray-300">Participants: <span id="participant-count" class="font-mono text-teal-300">1</span></p>
+                    </div>
+                    <button id="copy-link" class="w-full bg-blue-600 hover:bg-blue-500 text-white py-2 px-4 rounded transition mb-3">
+                        Copy Invite Link
                     </button>
-                    <button id="pause-btn" class="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 transition flex items-center gap-2">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zM7 8a1 1 0 012 0v4a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v4a1 1 0 102 0V8a1 1 0 00-1-1z" clip-rule="evenodd" />
-                        </svg>
-                        Tạm dừng
+                    <button id="leave-room" class="w-full bg-red-600 hover:bg-red-500 text-white py-2 px-4 rounded transition">
+                        Leave Room
                     </button>
                 </div>
-                
-                <div class="flex items-center justify-between mt-2">
-                    <span id="current-time" class="text-sm text-gray-500">0:00</span>
-                    <span id="duration" class="text-sm text-gray-500">0:00</span>
+
+                <div class="mb-6" id="video-url-section">
+                    <label class="block text-gray-300 mb-2" for="video-url">Video URL (YouTube, MP4, embeddable iframe):</label>
+                    <input type="text" id="video-url" class="w-full px-3 py-2 bg-gray-700 rounded mb-2 focus:outline-none focus:ring-2 focus:ring-teal-400" placeholder="https://youtube.com/watch?v=...">
+                    <button id="load-video" class="w-full bg-teal-600 hover:bg-teal-500 text-white py-2 px-4 rounded transition">Load Video</button>
                 </div>
-                <input type="range" id="progress-bar" min="0" max="100" value="0" class="w-full mt-2 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
-            </div>
-        </div>
-        
-        <!-- Chat Section -->
-        <div class="w-full md:w-80 bg-white rounded-lg shadow-sm overflow-hidden flex flex-col chat-container">
-            <div class="p-4 border-b border-gray-200">
-                <h2 class="text-lg font-semibold">Trò chuyện</h2>
-                <div class="mt-2">
-                    <input type="text" id="username" placeholder="Tên của bạn" class="w-full p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+
+                <div class="mb-6">
+                    <h3 class="text-lg font-medium mb-2 text-teal-300">Playback Controls</h3>
+                    <div class="flex space-x-2 mb-2">
+                        <button id="play-btn" class="flex-1 bg-green-600 hover:bg-green-500 text-white py-2 px-4 rounded transition">Play</button>
+                        <button id="pause-btn" class="flex-1 bg-yellow-600 hover:bg-yellow-500 text-white py-2 px-4 rounded transition">Pause</button>
+                    </div>
+                    <div class="mb-2">
+                        <input type="range" id="seek-bar" class="w-full" min="0" max="100" step="0.1" value="0">
+                        <div class="flex justify-between text-xs text-gray-400">
+                            <span id="current-time">0:00</span>
+                            <span id="duration">0:00</span>
+                        </div>
+                    </div>
+                    <div class="flex space-x-2">
+                        <button id="sync-btn" class="flex-1 bg-blue-600 hover:bg-blue-500 text-white py-2 px-4 rounded transition">Sync All</button>
+                        <button id="volume-btn" class="w-12 flex items-center justify-center bg-gray-700 hover:bg-gray-600 rounded transition">
+                            <span id="volume-icon">🔊</span>
+                        </button>
+                        <input type="range" id="volume-bar" class="flex-1" min="0" max="1" step="0.1" value="1">
+                    </div>
                 </div>
-            </div>
-            
-            <div id="chat-messages" class="flex-1 p-4 overflow-y-auto space-y-3">
-                <p class="text-sm text-gray-500 text-center">Bắt đầu trò chuyện khi xem video cùng nhau</p>
-            </div>
-            
-            <div class="p-4 border-t border-gray-200">
-                <div class="flex gap-2">
-                    <input type="text" id="message-input" placeholder="Nhắn tin..." class="flex-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    <button id="send-btn" class="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600 transition flex items-center gap-1">
-                        <span>Gửi</span>
-                        <div id="message-loading" class="loading-spinner hidden"></div>
+
+                <div id="voice-chat-controls">
+                    <h3 class="text-lg font-medium mb-2 text-teal-300">Voice Chat</h3>
+                    <button id="toggle-voice-chat" class="w-full flex items-center justify-center bg-red-600 hover:bg-red-500 text-white py-2 px-4 rounded transition">
+                        <span class="mr-2">🔴 Voice Chat Off</span>
                     </button>
+                    <div id="voice-participants" class="mt-3 space-y-2"></div>
+                </div>
+            </div>
+
+            <!-- Main content - Video player -->
+            <div class="lg:col-span-2 space-y-6">
+                <div id="video-container" class="video-container bg-black rounded-lg overflow-hidden shadow-lg">
+                    <div id="video-wrapper" class="video-wrapper w-full aspect-video bg-gray-900 flex items-center justify-center">
+                        <p id="video-placeholder" class="text-gray-500 text-lg">Enter a video URL and load the video to start watching with friends</p>
+                        <div id="video-player"></div>
+                    </div>
+                </div>
+
+                <!-- Chat box -->
+                <div class="bg-gray-800 rounded-lg p-6">
+                    <h2 class="text-xl font-semibold mb-4 text-teal-300">Chat</h2>
+                    <div id="chat-messages" class="h-64 overflow-y-auto mb-4 space-y-2"></div>
+                    <div class="flex">
+                        <input type="text" id="chat-input" class="flex-1 px-3 py-2 bg-gray-700 rounded-l focus:outline-none focus:ring-2 focus:ring-teal-400" placeholder="Type a message...">
+                        <button id="send-chat" class="bg-teal-600 hover:bg-teal-500 text-white py-2 px-4 rounded-r transition">Send</button>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 
     <script>
-        // WebSocket Configuration
-        const wsProtocol = window.location.protocol === 'https:' ? 'wss://' : 'ws://';
-        const wsHost = window.location.host;
-        const wsPath = '/ws'; // You'll need to set up a WebSocket server
-        const wsUrl = wsProtocol + wsHost + wsPath;
-        
-        // Fallback server for demo purposes (replace with your own server)
-        const fallbackWsUrl = 'wss://socketsbay.com/wss/v2/1/demo/';
-        
-        let socket;
-        let reconnectAttempts = 0;
-        const maxReconnectAttempts = 5;
-        const reconnectDelay = 3000; // 3 seconds
-        
         // DOM Elements
+        const roomCreationSection = document.getElementById('room-creation');
+        const roomInfoSection = document.getElementById('room-info');
+        const currentRoomIdSpan = document.getElementById('current-room-id');
+        const participantCountSpan = document.getElementById('participant-count');
+        const roomIdInput = document.getElementById('room-id');
+        const createRoomBtn = document.getElementById('create-room');
+        const joinRoomBtn = document.getElementById('join-room');
+        const copyLinkBtn = document.getElementById('copy-link');
+        const leaveRoomBtn = document.getElementById('leave-room');
         const videoUrlInput = document.getElementById('video-url');
-        const loadVideoBtn = document.getElementById('load-video-btn');
+        const loadVideoBtn = document.getElementById('load-video');
+        const videoPlaceholder = document.getElementById('video-placeholder');
+        const videoPlayer = document.getElementById('video-player');
         const playBtn = document.getElementById('play-btn');
         const pauseBtn = document.getElementById('pause-btn');
-        const progressBar = document.getElementById('progress-bar');
-        const currentTimeDisplay = document.getElementById('current-time');
-        const durationDisplay = document.getElementById('duration');
+        const seekBar = document.getElementById('seek-bar');
+        const currentTimeSpan = document.getElementById('current-time');
+        const durationSpan = document.getElementById('duration');
+        const syncBtn = document.getElementById('sync-btn');
+        const volumeBtn = document.getElementById('volume-btn');
+        const volumeIcon = document.getElementById('volume-icon');
+        const volumeBar = document.getElementById('volume-bar');
+        const toggleVoiceChatBtn = document.getElementById('toggle-voice-chat');
+        const voiceParticipants = document.getElementById('voice-participants');
         const chatMessages = document.getElementById('chat-messages');
-        const messageInput = document.getElementById('message-input');
-        const sendBtn = document.getElementById('send-btn');
-        const usernameInput = document.getElementById('username');
-        const connectionStatus = document.getElementById('connection-status');
-        const videoLoading = document.getElementById('video-loading');
-        const messageLoading = document.getElementById('message-loading');
-        
-        // Video State
-        let player;
-        let customVideo;
-        let currentVideoType = null; // 'youtube' or 'custom'
-        let isSyncing = false;
+        const chatInput = document.getElementById('chat-input');
+        const sendChatBtn = document.getElementById('send-chat');
+
+        // App state
+        let socket;
+        let currentRoomId = null;
+        let currentVideoUrl = null;
+        let isRoomOwner = false;
+        let videoElement = null;
+        let isPlaying = false;
         let lastSyncTime = 0;
-        const syncInterval = 2000; // Sync every 2 seconds
-        
-        // Initialize YouTube Player
-        function onYouTubeIframeAPIReady() {
-            player = new YT.Player('youtube-player', {
-                height: '100%',
-                width: '100%',
-                events: {
-                    'onReady': onPlayerReady,
-                    'onStateChange': onPlayerStateChange
+        let localStream = null;
+        let peerConnections = {};
+        let peerMediaStreams = {};
+        let isVoiceActive = false;
+        let userName = `User${Math.floor(Math.random() * 1000)}`;
+
+        // Initialize the app
+        function init() {
+            // Generate a room ID by default
+            roomIdInput.value = generateRoomId();
+            
+            // Event listeners
+            createRoomBtn.addEventListener('click', createRoom);
+            joinRoomBtn.addEventListener('click', joinRoom);
+            copyLinkBtn.addEventListener('click', copyRoomLink);
+            leaveRoomBtn.addEventListener('click', leaveRoom);
+            loadVideoBtn.addEventListener('click', loadVideo);
+            playBtn.addEventListener('click', playVideo);
+            pauseBtn.addEventListener('click', pauseVideo);
+            seekBar.addEventListener('input', seekVideo);
+            syncBtn.addEventListener('click', syncVideo);
+            volumeBtn.addEventListener('click', toggleMute);
+            volumeBar.addEventListener('input', changeVolume);
+            toggleVoiceChatBtn.addEventListener('click', toggleVoiceChat);
+            sendChatBtn.addEventListener('click', sendChatMessage);
+            chatInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') sendChatMessage();
+            });
+
+            // Connect to Socket.IO server
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const host = window.location.host;
+            socket = io(`${protocol}//${host}`, {
+                reconnectionAttempts: 5,
+                reconnectionDelay: 1000,
+                autoConnect: false
+            });
+
+            // Socket.IO event listeners
+            socket.on('connect', () => {
+                console.log('Connected to server');
+            });
+
+            socket.on('disconnect', () => {
+                console.log('Disconnected from server');
+                leaveRoom();
+            });
+
+            socket.on('room_created', (data) => {
+                currentRoomId = data.roomId;
+                isRoomOwner = true;
+                updateRoomUI();
+                addSystemMessage(`You created room ${currentRoomId}`);
+            });
+
+            socket.on('room_joined', (data) => {
+                currentRoomId = data.roomId;
+                isRoomOwner = false;
+                updateRoomUI();
+                addSystemMessage(`You joined room ${currentRoomId}`);
+                updateParticipantCount(data.participants);
+                
+                // If there's a video loaded in the room, load it
+                if (data.videoUrl) {
+                    currentVideoUrl = data.videoUrl;
+                    loadVideoElement(data.videoUrl);
                 }
             });
-        }
-        
-        function onPlayerReady(event) {
-            console.log("YouTube player is ready");
-        }
-        
-        function onPlayerStateChange(event) {
-            if (isSyncing) return;
-            
-            const currentTime = player.getCurrentTime();
-            const videoId = player.getVideoData().video_id;
-            const isPlaying = event.data === YT.PlayerState.PLAYING;
-            
-            syncVideoState({
-                type: 'youtube',
-                videoId: videoId,
-                currentTime: currentTime,
-                isPlaying: isPlaying,
-                timestamp: Date.now()
+
+            socket.on('user_joined', (data) => {
+                updateParticipantCount(data.participants);
+                addSystemMessage(`${data.userId} joined the room`);
             });
-            
-            updateProgressBar();
-        }
-        
-        // Initialize Custom Video
-        customVideo = document.getElementById('custom-video');
-        
-        customVideo.addEventListener('play', () => {
-            if (isSyncing) return;
-            syncVideoState({
-                type: 'custom',
-                videoUrl: customVideo.src,
-                currentTime: customVideo.currentTime,
-                isPlaying: true,
-                timestamp: Date.now()
-            });
-        });
-        
-        customVideo.addEventListener('pause', () => {
-            if (isSyncing) return;
-            syncVideoState({
-                type: 'custom',
-                videoUrl: customVideo.src,
-                currentTime: customVideo.currentTime,
-                isPlaying: false,
-                timestamp: Date.now()
-            });
-        });
-        
-        customVideo.addEventListener('seeked', () => {
-            if (isSyncing) return;
-            syncVideoState({
-                type: 'custom',
-                videoUrl: customVideo.src,
-                currentTime: customVideo.currentTime,
-                isPlaying: !customVideo.paused,
-                timestamp: Date.now()
-            });
-        });
-        
-        customVideo.addEventListener('timeupdate', updateProgressBar);
-        
-        // Connect to WebSocket
-        function connectWebSocket() {
-            try {
-                socket = new WebSocket(wsUrl);
+
+            socket.on('user_left', (data) => {
+                updateParticipantCount(data.participants);
+                addSystemMessage(`${data.userId} left the room`);
                 
-                socket.onopen = () => {
-                    console.log('WebSocket connected');
-                    reconnectAttempts = 0;
-                    updateConnectionStatus(true);
-                    
-                    // Request current state from server
-                    sendWebSocketMessage({
-                        type: 'get_state'
-                    });
-                };
-                
-                socket.onclose = () => {
-                    console.log('WebSocket disconnected');
-                    updateConnectionStatus(false);
-                    attemptReconnect();
-                };
-                
-                socket.onerror = (error) => {
-                    console.error('WebSocket error:', error);
-                    updateConnectionStatus(false);
-                };
-                
-                socket.onmessage = (event) => {
-                    try {
-                        const data = JSON.parse(event.data);
-                        handleWebSocketMessage(data);
-                    } catch (e) {
-                        console.error('Error parsing WebSocket message:', e);
-                    }
-                };
-                
-            } catch (e) {
-                console.error('WebSocket connection failed:', e);
-                attemptReconnect();
-            }
-        }
-        
-        function attemptReconnect() {
-            if (reconnectAttempts < maxReconnectAttempts) {
-                reconnectAttempts++;
-                console.log(`Attempting to reconnect (${reconnectAttempts}/${maxReconnectAttempts})...`);
-                setTimeout(connectWebSocket, reconnectDelay);
-            } else {
-                console.log('Max reconnection attempts reached. Using fallback server.');
-                useFallbackServer();
-            }
-        }
-        
-        function useFallbackServer() {
-            console.log('Connecting to fallback WebSocket server');
-            try {
-                socket = new WebSocket(fallbackWsUrl);
-                
-                socket.onopen = () => {
-                    console.log('Connected to fallback server');
-                    updateConnectionStatus(true);
-                };
-                
-                socket.onclose = () => {
-                    console.log('Fallback server disconnected');
-                    updateConnectionStatus(false);
-                };
-                
-                socket.onerror = (error) => {
-                    console.error('Fallback server error:', error);
-                    updateConnectionStatus(false);
-                };
-                
-                socket.onmessage = (event) => {
-                    try {
-                        const data = JSON.parse(event.data);
-                        handleWebSocketMessage(data);
-                    } catch (e) {
-                        console.error('Error parsing fallback message:', e);
-                    }
-                };
-                
-            } catch (e) {
-                console.error('Fallback server connection failed:', e);
-                updateConnectionStatus(false);
-            }
-        }
-        
-        function updateConnectionStatus(connected) {
-            const statusDot = connectionStatus.querySelector('div');
-            const statusText = connectionStatus.querySelector('span');
-            
-            if (connected) {
-                statusDot.className = 'w-2 h-2 rounded-full bg-green-500';
-                statusText.textContent = 'Đã kết nối';
-            } else {
-                statusDot.className = 'w-2 h-2 rounded-full bg-red-500';
-                statusText.textContent = `Mất kết nối (${reconnectAttempts}/${maxReconnectAttempts})`;
-            }
-        }
-        
-        function sendWebSocketMessage(message) {
-            if (socket && socket.readyState === WebSocket.OPEN) {
-                socket.send(JSON.stringify(message));
-            } else {
-                console.warn('WebSocket is not connected. Message not sent:', message);
-            }
-        }
-        
-        function handleWebSocketMessage(data) {
-            if (!data) return;
-            
-            switch (data.type) {
-                case 'video_state':
-                    handleVideoState(data);
-                    break;
-                case 'chat_message':
-                    handleChatMessage(data);
-                    break;
-                case 'system_message':
-                    showSystemMessage(data.message);
-                    break;
-                case 'current_state':
-                    if (data.video) handleVideoState(data.video);
-                    if (data.messages) {
-                        chatMessages.innerHTML = '';
-                        data.messages.forEach(msg => {
-                            handleChatMessage(msg);
-                        });
-                    }
-                    break;
-                default:
-                    console.log('Unknown message type:', data.type);
-            }
-        }
-        
-        function handleVideoState(state) {
-            if (!state || isSyncing) return;
-            
-            isSyncing = true;
-            const currentUsername = usernameInput.value.trim() || 'Ẩn danh';
-            
-            try {
-                if (state.type === 'youtube') {
-                    // Switch to YouTube player if needed
-                    if (currentVideoType !== 'youtube') {
-                        document.getElementById('youtube-player').style.display = 'block';
-                        customVideo.style.display = 'none';
-                        currentVideoType = 'youtube';
-                    }
-                    
-                    // Load video if different
-                    if (player.getVideoData().video_id !== state.videoId) {
-                        player.loadVideoById(state.videoId);
-                    }
-                    
-                    // Sync playback state
-                    if (state.isPlaying) {
-                        player.playVideo();
-                        showSystemMessage(`${state.username || 'Ai đó'} đã nhấn phát video`);
-                    } else {
-                        player.pauseVideo();
-                        showSystemMessage(`${state.username || 'Ai đó'} đã nhấn tạm dừng`);
-                    }
-                    
-                    // Sync time if needed
-                    const currentTime = player.getCurrentTime();
-                    if (Math.abs(currentTime - state.currentTime) > 2) {
-                        player.seekTo(state.currentTime, true);
-                    }
-                    
-                } else if (state.type === 'custom') {
-                    // Switch to custom video if needed
-                    if (currentVideoType !== 'custom') {
-                        document.getElementById('youtube-player').style.display = 'none';
-                        customVideo.style.display = 'block';
-                        currentVideoType = 'custom';
-                    }
-                    
-                    // Load video if different
-                    if (customVideo.src !== state.videoUrl) {
-                        customVideo.src = state.videoUrl;
-                        customVideo.load();
-                    }
-                    
-                    // Sync playback state
-                    if (state.isPlaying) {
-                        customVideo.play();
-                        showSystemMessage(`${state.username || 'Ai đó'} đã nhấn phát video`);
-                    } else {
-                        customVideo.pause();
-                        showSystemMessage(`${state.username || 'Ai đó'} đã nhấn tạm dừng`);
-                    }
-                    
-                    // Sync time if needed
-                    if (Math.abs(customVideo.currentTime - state.currentTime) > 2) {
-                        customVideo.currentTime = state.currentTime;
-                    }
+                // Clean up WebRTC connection if it exists
+                if (peerConnections[data.userId]) {
+                    peerConnections[data.userId].close();
+                    delete peerConnections[data.userId];
                 }
                 
-                lastSyncTime = Date.now();
-                
-            } catch (e) {
-                console.error('Error handling video state:', e);
-            } finally {
-                setTimeout(() => {
-                    isSyncing = false;
-                }, 500);
-            }
-        }
-        
-        function handleChatMessage(message) {
-            if (!message || !message.text) return;
-            
-            const currentUsername = usernameInput.value.trim() || 'Ẩn danh';
-            const isCurrentUser = message.username === currentUsername;
-            
-            addMessageToChat(message.username, message.text, isCurrentUser);
-        }
-        
-        function syncVideoState(state) {
-            if (!state) return;
-            
-            state.username = usernameInput.value.trim() || 'Ẩn danh';
-            state.timestamp = Date.now();
-            
-            sendWebSocketMessage({
-                type: 'video_state',
-                ...state
+                // Remove from voice participants display
+                const elem = document.getElementById(`voice-${data.userId}`);
+                if (elem) elem.remove();
             });
-        }
-        
-        function updateProgressBar() {
-            if (!currentVideoType) return;
-            
-            let currentTime, duration;
-            
-            if (currentVideoType === 'youtube' && player && player.getCurrentTime) {
-                currentTime = player.getCurrentTime();
-                duration = player.getDuration();
-            } else if (currentVideoType === 'custom' && customVideo) {
-                currentTime = customVideo.currentTime;
-                duration = customVideo.duration;
-            } else {
-                return;
-            }
-            
-            const progress = (currentTime / duration) * 100;
-            progressBar.value = progress;
-            
-            // Update time displays
-            currentTimeDisplay.textContent = formatTime(currentTime);
-            
-            if (!isNaN(duration)) {
-                durationDisplay.textContent = formatTime(duration);
-            } else {
-                durationDisplay.textContent = "0:00";
-            }
-            
-            // Periodically sync video state
-            const now = Date.now();
-            if (now - lastSyncTime > syncInterval && !isSyncing) {
-                if (currentVideoType === 'youtube') {
-                    syncVideoState({
-                        type: 'youtube',
-                        videoId: player.getVideoData().video_id,
-                        currentTime: player.getCurrentTime(),
-                        isPlaying: player.getPlayerState() === YT.PlayerState.PLAYING
-                    });
-                } else if (currentVideoType === 'custom') {
-                    syncVideoState({
-                        type: 'custom',
-                        videoUrl: customVideo.src,
-                        currentTime: customVideo.currentTime,
-                        isPlaying: !customVideo.paused
-                    });
+
+            socket.on('video_loaded', (url) => {
+                currentVideoUrl = url;
+                loadVideoElement(url);
+                addSystemMessage(`Video loaded: ${url}`);
+            });
+
+            socket.on('play_video', (time) => {
+                if (videoElement) {
+                    // Only sync if our time is significantly different
+                    if (Math.abs(videoElement.currentTime - time) > 1) {
+                        videoElement.currentTime = time;
+                    }
+                    videoElement.play().catch(e => console.error('Play error:', e));
+                    isPlaying = true;
+                    updatePlayPauseUI();
                 }
-            }
+            });
+
+            socket.on('pause_video', (time) => {
+                if (videoElement) {
+                    // Only sync if our time is significantly different
+                    if (Math.abs(videoElement.currentTime - time) > 1) {
+                        videoElement.currentTime = time;
+                    }
+                    videoElement.pause();
+                    isPlaying = false;
+                    updatePlayPauseUI();
+                }
+            });
+
+            socket.on('seek_video', (time) => {
+                if (videoElement && Math.abs(videoElement.currentTime - time) > 0.5) {
+                    videoElement.currentTime = time;
+                }
+            });
+
+            socket.on('sync_video', (time) => {
+                if (videoElement && Math.abs(videoElement.currentTime - time) > 1) {
+                    videoElement.currentTime = time;
+                    if (isPlaying) {
+                        videoElement.play().catch(e => console.error('Play error:', e));
+                    }
+                }
+            });
+
+            socket.on('chat_message', (data) => {
+                addChatMessage(data.userId, data.message, false);
+            });
+
+            socket.on('rtc_signal', handleRtcSignal);
+
+            // Set up periodic time sync to prevent drift
+            setInterval(() => {
+                if (videoElement && currentRoomId && Date.now() - lastSyncTime > 10000) {
+                    syncVideo();
+                }
+            }, 30000);
         }
-        
+
+        // Helper functions
+        function generateRoomId() {
+            return Math.random().toString(36).substring(2, 8).toUpperCase();
+        }
+
+        function updateRoomUI() {
+            roomCreationSection.classList.add('hidden');
+            roomInfoSection.classList.remove('hidden');
+            currentRoomIdSpan.textContent = currentRoomId;
+            document.getElementById('video-url-section').classList.remove('hidden');
+        }
+
+        function updatePlayPauseUI() {
+            playBtn.disabled = isPlaying;
+            pauseBtn.disabled = !isPlaying;
+        }
+
+        function updateParticipantCount(count) {
+            participantCountSpan.textContent = count;
+        }
+
+        function addSystemMessage(message) {
+            const messageElem = document.createElement('div');
+            messageElem.className = 'text-gray-400 text-center italic';
+            messageElem.textContent = message;
+            chatMessages.appendChild(messageElem);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
+        function addChatMessage(sender, message, isSelf) {
+            const messageElem = document.createElement('div');
+            messageElem.className = `flex ${isSelf ? 'justify-end' : 'justify-start'}`;
+            
+            const bubble = document.createElement('div');
+            bubble.className = `max-w-xs lg:max-w-md rounded-lg px-4 py-2 chat-bubble ${
+                isSelf ? 'bg-teal-600 rounded-tr-none' : 'bg-gray-700 rounded-tl-none'
+            }`;
+            bubble.textContent = message;
+            
+            messageElem.appendChild(bubble);
+            chatMessages.appendChild(messageElem);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+
         function formatTime(seconds) {
             const minutes = Math.floor(seconds / 60);
-            seconds = Math.floor(seconds % 60);
-            return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+            const secs = Math.floor(seconds % 60);
+            return `${minutes}:${secs < 10 ? '0' : ''}${secs}`;
         }
-        
-        // Load Video Function
-        loadVideoBtn.addEventListener('click', loadVideo);
-        videoUrlInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') loadVideo();
-        });
-        
+
+        // Room management
+        function createRoom() {
+            const roomId = roomIdInput.value.trim() || generateRoomId();
+            socket.connect();
+            socket.emit('create_room', { roomId });
+        }
+
+        function joinRoom() {
+            const roomId = roomIdInput.value.trim();
+            if (!roomId) {
+                alert('Please enter a room ID');
+                return;
+            }
+            socket.connect();
+            socket.emit('join_room', { roomId, userId: 'User' + Math.floor(Math.random() * 1000) });
+        }
+
+        function copyRoomLink() {
+            const link = `${window.location.href}?room=${currentRoomId}`;
+            navigator.clipboard.writeText(link).then(() => {
+                const originalText = copyLinkBtn.textContent;
+                copyLinkBtn.textContent = 'Link Copied!';
+                setTimeout(() => {
+                    copyLinkBtn.textContent = originalText;
+                }, 2000);
+            });
+        }
+
+        function leaveRoom() {
+            if (currentRoomId) {
+                socket.emit('leave_room', { roomId: currentRoomId });
+                currentRoomId = null;
+                roomCreationSection.classList.remove('hidden');
+                roomInfoSection.classList.add('hidden');
+                document.getElementById('video-url-section').classList.add('hidden');
+                
+                // Clean up video
+                if (videoElement) {
+                    videoElement.pause();
+                    videoElement.remove();
+                    videoElement = null;
+                }
+                
+                // Clean up WebRTC connections
+                for (const userId in peerConnections) {
+                    peerConnections[userId].close();
+                }
+                peerConnections = {};
+                peerMediaStreams = {};
+                
+                // Remove all voice participants from UI
+                while (voiceParticipants.firstChild) {
+                    voiceParticipants.removeChild(voiceParticipants.firstChild);
+                }
+                
+                // Reset voice chat button
+                isVoiceActive = false;
+                toggleVoiceChatBtn.innerHTML = '<span class="mr-2">🔴 Voice Chat Off</span>';
+                
+                addSystemMessage('You left the room');
+            }
+        }
+
+        // Video controls
         function loadVideo() {
             const url = videoUrlInput.value.trim();
             if (!url) {
-                alert("Vui lòng nhập link video");
+                alert('Please enter a video URL');
                 return;
             }
             
-            videoLoading.classList.remove('hidden');
-            
-            // Reset previous video
-            if (currentVideoType === 'youtube') {
-                document.getElementById('youtube-player').style.display = 'none';
-                player.stopVideo();
-            } else if (currentVideoType === 'custom') {
-                customVideo.style.display = 'none';
-                customVideo.pause();
-                customVideo.src = '';
-            }
-            
-            // Check if YouTube video
-            const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.?be)\/.+$/;
-            if (youtubeRegex.test(url)) {
-                // Extract YouTube video ID
-                let videoId = '';
-                const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
-                const match = url.match(regExp);
-                
-                if (match && match[2].length === 11) {
-                    videoId = match[2];
-                } else {
-                    alert('Không tìm thấy ID video YouTube trong đường dẫn này');
-                    videoLoading.classList.add('hidden');
-                    return;
-                }
-                
-                // Load YouTube video
-                try {
-                    player.loadVideoById(videoId);
-                    player.playVideo();
-                    document.getElementById('youtube-player').style.display = 'block';
-                    currentVideoType = 'youtube';
-                    
-                    // Sync with other users
-                    syncVideoState({
-                        type: 'youtube',
-                        videoId: videoId,
-                        currentTime: 0,
-                        isPlaying: true
-                    });
-                    
-                    showSystemMessage('Video YouTube đã được tải, thưởng thức cùng mọi người!');
-                } catch (e) {
-                    alert('Lỗi khi tải video YouTube: ' + e.message);
-                } finally {
-                    videoLoading.classList.add('hidden');
-                }
+            if (currentRoomId) {
+                socket.emit('load_video', { roomId: currentRoomId, url });
             } else {
-                // Assume it's a direct video URL
-                try {
-                    customVideo.src = url;
-                    customVideo.load();
-                    customVideo.style.display = 'block';
-                    currentVideoType = 'custom';
-                    
-                    // Sync with other users
-                    syncVideoState({
-                        type: 'custom',
-                        videoUrl: url,
-                        currentTime: 0,
-                        isPlaying: true
+                alert('You need to create or join a room first');
+            }
+        }
+
+        function loadVideoElement(url) {
+            // Clear previous video if exists
+            if (videoElement) {
+                videoElement.pause();
+                videoElement.remove();
+                videoElement = null;
+            }
+            
+            videoPlaceholder.classList.add('hidden');
+            
+            let videoHtml = '';
+            
+            // Check for YouTube URL
+            const youtubeRegex = /^.*(youtu.be\/|v\/|watch\?v=|\&v=)([^#\&\?]*).*/;
+            const youtubeMatch = url.match(youtubeRegex);
+            
+            if (youtubeMatch && youtubeMatch[2].length === 11) {
+                const youtubeId = youtubeMatch[2];
+                videoHtml = `
+                    <iframe 
+                        width="100%" 
+                        height="100%" 
+                        src="https://www.youtube.com/embed/${youtubeId}?enablejsapi=1" 
+                        frameborder="0" 
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
+                        allowfullscreen
+                    ></iframe>
+                `;
+            } 
+            // Check for MP4 or other direct video URLs
+            else if (url.endsWith('.mp4') || url.includes('mp4') || url.includes('webm')) {
+                videoHtml = `
+                    <video 
+                        width="100%" 
+                        height="100%" 
+                        controls
+                        crossorigin="anonymous"
+                    >
+                        <source src="${url}" type="video/mp4">
+                    </video>
+                `;
+            } 
+            // Assume it's an embeddable iframe
+            else {
+                videoHtml = `
+                    <iframe 
+                        width="100%" 
+                        height="100%" 
+                        src="${url}" 
+                        frameborder="0" 
+                        allowfullscreen
+                    ></iframe>
+                `;
+            }
+            
+            videoPlayer.innerHTML = videoHtml;
+            
+            // Find the video element (either <video> or YouTube iframe)
+            videoElement = videoPlayer.querySelector('video, iframe');
+
+            if (videoElement.tagName === 'VIDEO') {
+                // Set up event listeners for HTML5 video
+                videoElement.addEventListener('play', handlePlay);
+                videoElement.addEventListener('pause', handlePause);
+                videoElement.addEventListener('seeked', handleSeek);
+                videoElement.addEventListener('timeupdate', updateTimeDisplay);
+                videoElement.addEventListener('volumechange', updateVolumeUI);
+                
+                // Force the video to use CORS if it's a direct video URL
+                videoElement.setAttribute('crossorigin', 'anonymous');
+            } else if (videoElement.tagName === 'IFRAME' && url.includes('youtube.com')) {
+                // For YouTube, we'll need to use YouTube API
+                const tag = document.createElement('script');
+                tag.src = "https://www.youtube.com/iframe_api";
+                const firstScriptTag = document.getElementsByTagName('script')[0];
+                firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+                
+                // This will be called by YouTube API
+                window.onYouTubeIframeAPIReady = () => {
+                    const player = new YT.Player(videoElement, {
+                        events: {
+                            'onReady': onYouTubePlayerReady,
+                            'onStateChange': onYouTubePlayerStateChange
+                        }
                     });
-                    
-                    showSystemMessage('Video trực tiếp đã được tải, thưởng thức cùng mọi người!');
-                } catch (e) {
-                    alert('Lỗi khi tải video trực tiếp: ' + e.message);
-                } finally {
-                    videoLoading.classList.add('hidden');
+                    videoElement.ytPlayer = player;
+                };
+            }
+        }
+
+        function handlePlay() {
+            if (!currentRoomId || !isRoomOwner) return;
+            isPlaying = true;
+            updatePlayPauseUI();
+            socket.emit('play_video', { 
+                roomId: currentRoomId, 
+                time: videoElement.currentTime 
+            });
+        }
+
+        function handlePause() {
+            if (!currentRoomId || !isRoomOwner) return;
+            isPlaying = false;
+            updatePlayPauseUI();
+            socket.emit('pause_video', { 
+                roomId: currentRoomId, 
+                time: videoElement.currentTime 
+            });
+        }
+
+        function handleSeek() {
+            if (!currentRoomId || !isRoomOwner) return;
+            socket.emit('seek_video', { 
+                roomId: currentRoomId, 
+                time: videoElement.currentTime 
+            });
+        }
+
+        function playVideo() {
+            if (!videoElement) return;
+            
+            if (videoElement.tagName === 'VIDEO') {
+                videoElement.play();
+            } else if (videoElement.ytPlayer) {
+                videoElement.ytPlayer.playVideo();
+            }
+        }
+
+        function pauseVideo() {
+            if (!videoElement) return;
+            
+            if (videoElement.tagName === 'VIDEO') {
+                videoElement.pause();
+            } else if (videoElement.ytPlayer) {
+                videoElement.ytPlayer.pauseVideo();
+            }
+        }
+
+        function seekVideo() {
+            if (!videoElement) return;
+            
+            const seekTo = videoElement.duration * (seekBar.value / 100);
+            
+            if (videoElement.tagName === 'VIDEO') {
+                videoElement.currentTime = seekTo;
+            } else if (videoElement.ytPlayer) {
+                videoElement.ytPlayer.seekTo(seekTo, true);
+            }
+        }
+
+        function syncVideo() {
+            if (!videoElement || !currentRoomId) return;
+            
+            let currentTime = 0;
+            if (videoElement.tagName === 'VIDEO') {
+                currentTime = videoElement.currentTime;
+            } else if (videoElement.ytPlayer) {
+                currentTime = videoElement.ytPlayer.getCurrentTime();
+            }
+            
+            socket.emit('sync_video', { 
+                roomId: currentRoomId, 
+                time: currentTime 
+            });
+            lastSyncTime = Date.now();
+        }
+
+        function updateTimeDisplay() {
+            if (!videoElement) return;
+            
+            if (videoElement.tagName === 'VIDEO') {
+                currentTimeSpan.textContent = formatTime(videoElement.currentTime);
+                durationSpan.textContent = formatTime(videoElement.duration);
+                
+                if (videoElement.duration > 0) {
+                    seekBar.value = (videoElement.currentTime / videoElement.duration) * 100;
+                }
+            } else if (videoElement.ytPlayer) {
+                currentTimeSpan.textContent = formatTime(videoElement.ytPlayer.getCurrentTime());
+                durationSpan.textContent = formatTime(videoElement.ytPlayer.getDuration());
+                
+                if (videoElement.ytPlayer.getDuration() > 0) {
+                    seekBar.value = (videoElement.ytPlayer.getCurrentTime() / videoElement.ytPlayer.getDuration()) * 100;
                 }
             }
         }
-        
-        // Video Controls
-        playBtn.addEventListener('click', () => {
-            if (currentVideoType === 'youtube' && player && player.playVideo) {
-                player.playVideo();
-            } else if (currentVideoType === 'custom' && customVideo) {
-                customVideo.play();
-            }
-        });
-        
-        pauseBtn.addEventListener('click', () => {
-            if (currentVideoType === 'youtube' && player && player.pauseVideo) {
-                player.pauseVideo();
-            } else if (currentVideoType === 'custom' && customVideo) {
-                customVideo.pause();
-            }
-        });
-        
-        progressBar.addEventListener('input', () => {
-            if (!currentVideoType) return;
+
+        function toggleMute() {
+            if (!videoElement) return;
             
-            const seekTime = (progressBar.value / 100) * getCurrentVideoDuration();
-            
-            if (currentVideoType === 'youtube' && player && player.seekTo) {
-                player.seekTo(seekTime, true);
-            } else if (currentVideoType === 'custom' && customVideo) {
-                customVideo.currentTime = seekTime;
+            if (videoElement.tagName === 'VIDEO') {
+                videoElement.muted = !videoElement.muted;
+                updateVolumeUI();
             }
-        });
-        
-        function getCurrentVideoDuration() {
-            if (currentVideoType === 'youtube' && player && player.getDuration) {
-                return player.getDuration();
-            } else if (currentVideoType === 'custom' && customVideo && !isNaN(customVideo.duration)) {
-                return customVideo.duration;
-            }
-            return 0;
         }
-        
-        // Chat Functionality
-        sendBtn.addEventListener('click', sendMessage);
-        messageInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') sendMessage();
-        });
-        
-        function sendMessage() {
-            const message = messageInput.value.trim();
-            const username = usernameInput.value.trim() || 'Ẩn danh';
+
+        function changeVolume() {
+            if (!videoElement || videoElement.tagName !== 'VIDEO') return;
             
-            if (!message) {
-                alert("Vui lòng nhập tin nhắn");
-                return;
+            videoElement.volume = volumeBar.value;
+            updateVolumeUI();
+        }
+
+        function updateVolumeUI() {
+            if (!videoElement || videoElement.tagName !== 'VIDEO') return;
+            
+            if (videoElement.muted || videoElement.volume === 0) {
+                volumeIcon.textContent = '🔇';
+            } else if (videoElement.volume < 0.5) {
+                volumeIcon.textContent = '🔈';
+            } else {
+                volumeIcon.textContent = '🔊';
             }
             
-            if (!username) {
-                alert("Vui lòng nhập tên của bạn");
-                return;
+            volumeBar.value = videoElement.volume;
+        }
+
+        // YouTube API callbacks
+        function onYouTubePlayerReady(event) {
+            console.log('YouTube player ready');
+        }
+
+        function onYouTubePlayerStateChange(event) {
+            if (!currentRoomId || !isRoomOwner) return;
+            
+            if (event.data === YT.PlayerState.PLAYING) {
+                isPlaying = true;
+                updatePlayPauseUI();
+                socket.emit('play_video', { 
+                    roomId: currentRoomId, 
+                    time: event.target.getCurrentTime() 
+                });
+            } else if (event.data === YT.PlayerState.PAUSED) {
+                isPlaying = false;
+                updatePlayPauseUI();
+                socket.emit('pause_video', { 
+                    roomId: currentRoomId, 
+                    time: event.target.getCurrentTime() 
+                });
+            } else if (event.data === YT.PlayerState.BUFFERING) {
+                // We might want to sync when buffering to prevent desync
+                lastSyncTime = Date.now();
+                socket.emit('sync_video', { 
+                    roomId: currentRoomId, 
+                    time: event.target.getCurrentTime() 
+                });
             }
+        }
+
+        // Chat functions
+        function sendChatMessage() {
+            const message = chatInput.value.trim();
+            if (!message || !currentRoomId) return;
             
-            messageLoading.classList.remove('hidden');
-            
-            sendWebSocketMessage({
-                type: 'chat_message',
-                username: username,
-                text: message,
-                timestamp: Date.now()
+            socket.emit('chat_message', { 
+                roomId: currentRoomId, 
+                message 
             });
             
-            messageInput.value = '';
-            messageLoading.classList.add('hidden');
+            addChatMessage('You', message, true);
+            chatInput.value = '';
         }
-        
-        function showSystemMessage(text) {
-            const messageElement = document.createElement('p');
-            messageElement.className = 'text-sm text-gray-500 text-center';
-            messageElement.textContent = text;
-            chatMessages.appendChild(messageElement);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-        }
-        
-        function addMessageToChat(username, text, isCurrentUser) {
-            const messageDiv = document.createElement('div');
-            messageDiv.className = isCurrentUser ? 'message-current-user' : 'message-other-user';
-            messageDiv.className += ' p-3 max-w-xs md:max-w-md';
-            
-            const usernameSpan = document.createElement('span');
-            usernameSpan.className = 'font-semibold text-xs block mb-1';
-            usernameSpan.textContent = username;
-            
-            const textSpan = document.createElement('span');
-            textSpan.className = 'text-sm';
-            textSpan.textContent = text;
-            
-            messageDiv.appendChild(usernameSpan);
-            messageDiv.appendChild(textSpan);
-            chatMessages.appendChild(messageDiv);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
-        }
-        
-        // Initialize
-        connectWebSocket();
-        usernameInput.focus();
-        
-        // Periodically check connection
-        setInterval(() => {
-            if (!socket || socket.readyState !== WebSocket.OPEN) {
-                updateConnectionStatus(false);
+
+        // WebRTC functions
+        async function toggleVoiceChat() {
+            if (isVoiceActive) {
+                // Disable voice chat
+                isVoiceActive = false;
+                toggleVoiceChatBtn.innerHTML = '<span class="mr-2">🔴 Voice Chat Off</span>';
+                
+                // Stop local stream
+                if (localStream) {
+                    localStream.getTracks().forEach(track => track.stop());
+                    localStream = null;
+                }
+                
+                // Close all peer connections
+                for (const userId in peerConnections) {
+                    peerConnections[userId].close();
+                }
+                peerConnections = {};
+                
+                // Clear voice participants
+                voiceParticipants.innerHTML = '';
+                
+                socket.emit('voice_chat_toggle', { 
+                    roomId: currentRoomId, 
+                    active: false 
+                });
+            } else {
+                // Enable voice chat
+                try {
+                    localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    isVoiceActive = true;
+                    toggleVoiceChatBtn.innerHTML = '<span class="mr-2">🟢 Voice Chat On</span>';
+                    
+                    // Ask to join voice chat
+                    socket.emit('voice_chat_toggle', { 
+                        roomId: currentRoomId, 
+                        active: true 
+                    });
+                } catch (err) {
+                    console.error('Error accessing microphone:', err);
+                    alert('Could not access microphone. Please check permissions.');
+                }
             }
-        }, 5000);
+        }
+
+        async function createPeerConnection(userId) {
+            if (!localStream) return;
+            
+            const configuration = { 
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:global.stun.twilio.com:3478?transport=udp' }
+                ] 
+            };
+            
+            const peerConnection = new RTCPeerConnection(configuration);
+            peerConnections[userId] = peerConnection;
+            
+            // Add our local audio stream
+            localStream.getTracks().forEach(track => {
+                peerConnection.addTrack(track, localStream);
+            });
+            
+            // When remote adds a track
+            peerConnection.ontrack = (event) => {
+                const audioElem = document.createElement('audio');
+                audioElem.srcObject = event.streams[0];
+                audioElem.autoplay = true;
+                
+                const participantElem = document.createElement('div');
+                participantElem.id = `voice-${userId}`;
+                participantElem.className = 'flex items-center bg-gray-700 p-2 rounded';
+                participantElem.innerHTML = `
+                    <span class="w-3 h-3 rounded-full bg-green-500 mr-2 pulse"></span>
+                    <span class="text-sm">${userId}</span>
+                `;
+                participantElem.appendChild(audioElem);
+                voiceParticipants.appendChild(participantElem);
+                
+                // Store the stream to pause/play later if needed
+                peerMediaStreams[userId] = event.streams[0];
+            };
+            
+            // ICE candidate handling
+            peerConnection.onicecandidate = (event) => {
+                if (event.candidate) {
+                    socket.emit('rtc_signal', {
+                        to: userId,
+                        roomId: currentRoomId,
+                        signal: {
+                            type: 'candidate',
+                            candidate: event.candidate
+                        }
+                    });
+                }
+            };
+            
+            // Offer to connect
+            if (isRoomOwner) {
+                try {
+                    const offer = await peerConnection.createOffer();
+                    await peerConnection.setLocalDescription(offer);
+                    
+                    socket.emit('rtc_signal', {
+                        to: userId,
+                        roomId: currentRoomId,
+                        signal: {
+                            type: 'offer',
+                            offer: offer
+                        }
+                    });
+                } catch (err) {
+                    console.error('Error creating offer:', err);
+                }
+            }
+            
+            return peerConnection;
+        }
+
+        async function handleRtcSignal(data) {
+            const { from: userId, signal } = data;
+            
+            let peerConnection = peerConnections[userId];
+            if (!peerConnection && signal.type === 'offer') {
+                peerConnection = await createPeerConnection(userId);
+            }
+            
+            if (!peerConnection) return;
+            
+            try {
+                if (signal.type === 'offer') {
+                    await peerConnection.setRemoteDescription(new RTCSessionDescription(signal.offer));
+                    
+                    const answer = await peerConnection.createAnswer();
+                    await peerConnection.setLocalDescription(answer);
+                    
+                    socket.emit('rtc_signal', {
+                        to: userId,
+                        roomId: currentRoomId,
+                        signal: {
+                            type: 'answer',
+                            answer: answer
+                        }
+                    });
+                } else if (signal.type === 'answer') {
+                    await peerConnection.setRemoteDescription(new RTCSessionDescription(signal.answer));
+                } else if (signal.type === 'candidate') {
+                    await peerConnection.addIceCandidate(new RTCIceCandidate(signal.candidate));
+                }
+            } catch (err) {
+                console.error('Error handling signal:', err);
+            }
+        }
+
+        // Initialize the app when the page loads
+        document.addEventListener('DOMContentLoaded', init);
+
+        // Check for room ID in URL
+        if (window.location.href.includes('?room=')) {
+            const urlParams = new URLSearchParams(window.location.search);
+            const roomId = urlParams.get('room');
+            if (roomId) {
+                roomIdInput.value = roomId;
+            }
+        }
     </script>
 </body>
 </html>
+
